@@ -1,0 +1,10 @@
+output*/
+__pycache__/
+assets/*
+complete*/
+numnber_gestures/
+pose_visualization/
+*.json
+*.png
+*.xml
+dataset_collector.py

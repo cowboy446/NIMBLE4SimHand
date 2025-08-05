@@ -126,9 +126,9 @@ class NIMBLELayer(torch.nn.Module):
         return th_v_shaped, jreg_bone_joints
 
     def generate_full_pose(self, theta, normalized=True, with_root=True):
-        # theta : B, N
+        # theta : B, N (batchsize x 30)
         batch_size = theta.shape[0]
-
+        # import pdb; pdb.set_trace()
         if with_root:
             real_theta = theta[:, 3:]
             root_rot = theta[:, :3]
@@ -142,8 +142,11 @@ class NIMBLELayer(torch.nn.Module):
         else:
             theta_real_denorm = real_theta
 
-        full_pose = (self.pose_basis[:pose_ncomp].T @ theta_real_denorm.T).T + self.pose_mean.unsqueeze(0).repeat(batch_size, 1)
+        # 从pca降维后的结果映射回原始空间: ([57, 30] x [30, B]).T --> [B, 57]
+        full_pose = (self.pose_basis[:pose_ncomp].T @ theta_real_denorm.T).T + self.pose_mean.unsqueeze(0).repeat(batch_size, 1) 
+        # cat root rotation, [B, 57 + 3] --> [B, 60]
         full_pose = torch.cat([root_rot, full_pose], dim=1).view(batch_size, -1, 3)
+        # [B, 60] --> [B, 20, 3]
 
         return full_pose
 
@@ -181,7 +184,7 @@ class NIMBLELayer(torch.nn.Module):
             full_pose = self.generate_full_pose(pose_param, normalized=True, with_root=False).view(-1, 20, 3)
         else:
             full_pose = pose_param.view(-1, 20, 3)
-
+        # import pdb; pdb.set_trace()
         th_v_shaped, jreg_joints = self.generate_hand_shape(shape_param,normalized=True)
 
         mesh_v, bone_joints = self.forward_full(th_v_shaped, full_pose, None, jreg_joints, self.sw, self.pbs)
@@ -255,6 +258,7 @@ class NIMBLELayer(torch.nn.Module):
         
 
         skinning_weight = skinning_weight.reshape(1, -1, STATIC_JOINT_NUM)
+        # import pdb; pdb.set_trace()
         th_verts = self.compute_warp(batch_size, points_pose_bs, skinning_weight, th_results2)
 
         th_jtr = torch.stack(th_results_global, dim=1)[:, :, :3, 3]
@@ -285,6 +289,76 @@ class NIMBLELayer(torch.nn.Module):
             th_verts = th_verts + offset
 
         return th_verts, th_jtr
+    
+    def forward_joints(self, pose_param, shape_param, root_trans=None, global_scale=None):
+        
+        if self.use_pose_pca:
+            full_pose = self.generate_full_pose(pose_param, normalized=True, with_root=False).view(-1, 20, 3)
+        else:
+            full_pose = pose_param.view(-1, 20, 3)
+        batch_size = full_pose.shape[0]
+        _, joints = self.generate_hand_shape(shape_param,normalized=True)
+
+        _, th_rot_map = th_posemap_axisang_2output(full_pose.view(batch_size, -1))
+        th_full_pose = full_pose.view(batch_size, -1, 3)
+        root_rot = batch_rodrigues(th_full_pose[:, 0]).view(batch_size, 3, 3)
+
+        th_j = joints
+
+        # if pose_bs is not None:
+        # th_pose_map: 1, 19*3
+        # points: B, N, 3
+        # template_muscle_tet_pose_bs: N, 3, 25*3
+        # with pose blend shape
+        #     points_pose_bs = points + torch.matmul(
+        #         pose_bs, th_pose_map.transpose(0, 1)).permute(2, 0, 1)
+        # else:
+        #     points_pose_bs = points
+
+        th_results = []
+        root_j = th_j[:, 0, :].contiguous().view(batch_size, 3, 1)
+        th_results.append(th_with_zeros(torch.cat([root_rot, root_j], 2)))
+
+        # Rotate each part
+        for i in range(STATIC_JOINT_NUM - 1):
+            i_val_joint = int(i + 1)
+            if i_val_joint in JOINT_ID_BONE_DICT:
+                i_val_bone = JOINT_ID_BONE_DICT[i_val_joint]
+                joint_rot = th_rot_map[:, (i_val_bone - 1) * 9:i_val_bone * 9].contiguous().view(batch_size, 3, 3)
+            else:
+                joint_rot = self.identity_rot.repeat(batch_size, 1, 1)
+
+            joint_j = th_j[:, i_val_joint, :].contiguous().view(batch_size, 3, 1)
+            parent = self.kintree_parents[i_val_joint]
+            parent_j = th_j[:, parent, :].contiguous().view(batch_size, 3, 1)
+            joint_rel_transform = th_with_zeros(torch.cat([joint_rot, joint_j - parent_j], 2))
+
+            th_results.append(torch.matmul(th_results[parent], joint_rel_transform))
+
+        th_results_global = th_results
+
+
+        th_jtr = torch.stack(th_results_global, dim=1)[:, :, :3, 3]
+
+        # global scaling
+        if global_scale is not None:
+            center_joint = th_jtr[:, ROOT_JOINT_IDX].unsqueeze(1)
+            th_jtr = th_jtr - center_joint
+
+            j_scale = global_scale.expand(th_jtr.shape[0], th_jtr.shape[1])
+            j_scale = j_scale.unsqueeze(2).repeat(1, 1, 3)
+            th_jtr = th_jtr * j_scale
+            th_jtr = th_jtr + center_joint
+
+        # global translation
+        if root_trans is not None:
+            root_position = root_trans.view(batch_size, 1, 3)
+            center_joint = th_jtr[:, ROOT_JOINT_IDX].unsqueeze(1)
+            offset = root_position - center_joint
+        
+            th_jtr = th_jtr + offset
+
+        return th_jtr
 
 
     def mesh_collision(self, floating_verts, floating_verts_normals, steady_verts, steady_faces):

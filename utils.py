@@ -9,6 +9,7 @@ import numpy as np
 from pathlib import Path
 from pytorch3d.structures.meshes import Meshes
 import pytorch3d.ops
+import os
 
 ROOT_JOINT_IDX = 0  # wrist
 DOF2_BONES = [1, 2, 4, 5, 8, 9, 12, 13, 16, 17]
@@ -330,37 +331,52 @@ def vertices2landmarks(
 
 
 def save_textured_nimble(fname, skin_v, tex_img):
-    ### batch_size = 1
+    # 保持你的目录结构不变
     import cv2
     textured_pkl = "assets/NIMBLE_TEX_FUV.pkl"
-
+    from pathlib import Path
     fname = Path(fname)
 
-    obj_name_skin = fname.parent / (fname.stem + "_skin.obj")
-    mtl_name = obj_name_skin.with_suffix(".mtl")
-    
-    # texture image
-    tex_name_diffuse = fname.parent / (fname.stem + "_diffuse.png")
-    tex_img = np.uint8(tex_img * 255)
-    
-    cv2.imwrite(str(tex_name_diffuse), tex_img[:,:, :3])
-    cv2.imwrite(str(fname.parent / (fname.stem + "_normal.png")), tex_img[:,:,3:6])
-    cv2.imwrite(str(fname.parent / (fname.stem + "_spec.png")), tex_img[:,:,6:])
+    # 你的结构: skin/skin/xxx.obj, skin/texture/xxx_diffuse.png, skin/mtl/xxx.mtl
+    skin_dir = fname.parent
+    tex_dir = skin_dir.parent / "texture"
+    normal_dir = skin_dir.parent / "normal"
+    spec_dir = skin_dir.parent / "spec"
+    mtl_dir = skin_dir.parent / "mtl"
 
-    # mtl
+    skin_dir.mkdir(exist_ok=True)
+    tex_dir.mkdir(exist_ok=True)
+    normal_dir.mkdir(exist_ok=True)
+    spec_dir.mkdir(exist_ok=True)
+    mtl_dir.mkdir(exist_ok=True)
+
+    obj_name_skin = fname
+    mtl_name = mtl_dir / (fname.stem + ".mtl")
+    tex_name_diffuse = tex_dir / (fname.stem + "_diffuse.png")
+    tex_img = np.uint8(tex_img * 255)
+    cv2.imwrite(str(tex_name_diffuse), tex_img[:, :, :3])
+    cv2.imwrite(str(normal_dir / (fname.stem + "_normal.png")), tex_img[:, :, 3:6])
+    cv2.imwrite(str(spec_dir / (fname.stem + "_spec.png")), tex_img[:, :, 6:])
+    
+    # mtl: 纹理路径写成 ../../texture/xxx_diffuse.png
     mtl_str = "newmtl material_0\nKa 0.200000 0.200000 0.200000\nKd 0.800000 0.800000 0.800000\nKs 1.000000 1.000000 1.000000\nTr 1.000000\nillum 2\nNs 0.000000\nmap_Kd "
-    mtl_str = mtl_str + tex_name_diffuse.name
+    tex_rel_path = os.path.relpath(tex_name_diffuse, start=skin_dir)
+    mtl_str = mtl_str + tex_rel_path.replace("\\", "/")
     with open(mtl_name, "w") as f:
         f.writelines(mtl_str)
+    print("save to", mtl_name)
 
     # obj
     f_uv = np.load(textured_pkl, allow_pickle=True)
     with open(obj_name_skin, "w") as f:
-        f.write("mtllib {:s}\n".format(mtl_name.name))    
+        # 写入纹理
+        f.writelines("mtllib ../mtl/{}.mtl\n".format(fname.stem))
+        # 写入材质
+        f.writelines("usemtl material_0\n")
+
         for v in skin_v:
             f.writelines("v {:.5f} {:.5f} {:.5f}\n".format(v[0], v[1], v[2]))
         f.writelines(f_uv)
-
     print("save to", fname)
 
 
