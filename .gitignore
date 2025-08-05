@@ -2,7 +2,7 @@ output*/
 __pycache__/
 assets/*
 complete*/
-numnber_gestures/
+number_gestures/
 pose_visualization/
 *.json
 *.png
