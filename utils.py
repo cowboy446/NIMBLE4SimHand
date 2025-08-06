@@ -236,6 +236,94 @@ def th_posemap_axisang_2output(pose_vectors):
     pose_maps = subtract_flat_id(rot_mats)
     return pose_maps, rot_mats
 
+def posevec_2axisang(pose_3d, rest_pose_3d):
+    exclude_children = [1, 5, 10, 15, 20]  # wrist and thumb base
+    used_children = [i for i in range(25) if i not in exclude_children]
+    axis_ang_list = torch.zeros((pose_3d.shape[0], len(used_children), 3), dtype=pose_3d.dtype, device=pose_3d.device)
+    exclude_axis_ang_list = torch.zeros((pose_3d.shape[0], len(exclude_children), 3), dtype=pose_3d.dtype, device=pose_3d.device)
+    for i, idx in enumerate(used_children):
+        print("i = ", i, "idx = ", idx)
+        parent = JOINT_PARENT_ID_DICT[idx]
+        if parent == -1:
+            continue
+        print(pose_3d.shape, rest_pose_3d.shape)
+        p_parent = pose_3d[:, parent, :]
+        p_child = pose_3d[:, idx, :]
+        rest_parent = rest_pose_3d[:, parent, :]
+        # import pdb; pdb.set_trace()
+        rest_child = rest_pose_3d[:, idx, :]
+        axis_ang = ik_hand_pose(p_parent, p_child, rest_parent, rest_child)
+        axis_ang_list[:, i, :] = axis_ang
+    for i, idx in enumerate(exclude_children):
+        print("i = ", i, "idx = ", idx)
+        parent = JOINT_PARENT_ID_DICT[idx]
+        if parent == -1:
+            continue
+        print(pose_3d.shape, rest_pose_3d.shape)
+        p_parent = pose_3d[:, parent, :]
+        p_child = pose_3d[:, idx, :]
+        rest_parent = rest_pose_3d[:, parent, :]
+        rest_child = rest_pose_3d[:, idx, :]
+        axis_ang = ik_hand_pose(p_parent, p_child, rest_parent, rest_child)
+        exclude_axis_ang_list[:, i, :] = axis_ang
+    # 从全局变换计算局部local变换
+    axis_ang_local_list = torch.zeros_like(axis_ang_list)
+    for i in range(len(used_children)):
+        child_idx = used_children[i]
+        parent = JOINT_PARENT_ID_DICT[child_idx]
+        if parent == -1:
+            continue
+        if parent in exclude_children:
+            parent_i = exclude_children.index(parent)
+            parent_axis_ang = exclude_axis_ang_list[:, parent_i, :]
+            child_axis_ang = axis_ang_list[:, i, :]
+        elif parent in used_children:
+            parent_i = used_children.index(parent)
+            parent_axis_ang = axis_ang_list[:, parent_i, :]
+            child_axis_ang = axis_ang_list[:, i, :]
+            
+        # 转为四元数和旋转矩阵
+        parent_quat = batch_aa2quat(parent_axis_ang)
+        child_quat = batch_aa2quat(child_axis_ang)
+        parent_rot = quat2mat(parent_quat)
+        child_rot = quat2mat(child_quat)
+        
+        # 计算局部旋转: local = parent^T * child
+        local_rot = torch.matmul(parent_rot.transpose(1, 2), child_rot)
+        
+        # 转回轴角: 旋转矩阵 -> 四元数 -> 轴角
+        from pytorch3d.transforms import matrix_to_axis_angle
+        local_axis_ang = matrix_to_axis_angle(local_rot)
+        print("local_axis_ang.shape = ", local_axis_ang.shape)
+        axis_ang_local_list[:, i, :] = local_axis_ang
+
+    # pose_3d = pose_3d.reshape(pose_3d.shape[0], -1)
+    # import pdb; pdb.set_trace()
+    length = torch.norm(axis_ang_local_list, dim=-1, keepdim=True)
+    length[length < 1e-8] = 1.0
+    direction = axis_ang_local_list / length
+    print("axis_ang_local_list: ", axis_ang_local_list)
+    return axis_ang_local_list, direction, length
+
+def ik_hand_pose(p_parent, p_child, rest_parent, rest_child):
+    # 输入都是 B x 3
+    v_pose = p_child - p_parent  # B x 3
+    v_rest = rest_child - rest_parent  # B x 3
+    v_pose = v_pose / (torch.norm(v_pose, dim=-1, keepdim=True) + 1e-8)
+    v_rest = v_rest / (torch.norm(v_rest, dim=-1, keepdim=True) + 1e-8)
+
+    cos_theta = torch.sum(v_pose * v_rest, dim=-1, keepdim=True)
+    cos_theta = torch.clamp(cos_theta, -1.0, 1.0)
+    theta = torch.acos(cos_theta)
+    axis = torch.cross(v_rest, v_pose, dim=-1)
+    axis = axis / (torch.norm(axis, dim=-1, keepdim=True) + 1e-8)
+    axis = torch.nan_to_num(axis, nan=0.0, posinf=0.0, neginf=0.0)
+    axis_ang = axis * theta
+    axis_ang = torch.nan_to_num(axis_ang, nan=0.0, posinf=0.0, neginf=0.0)
+    return axis_ang
+
+
+
 def subtract_flat_id(rot_mats):
     # Subtracts identity as a flattened tensor
     rot_nb = int(rot_mats.shape[1] / 9)
@@ -389,3 +477,19 @@ def smooth_mesh(mesh_p3d):
     target_mv[nan_mv] = mesh_p3d.verts_padded()[nan_mv]  
     mesh_p3d_smooth_fixnan = Meshes(target_mv, mesh_p3d.faces_padded())
     return mesh_p3d_smooth_fixnan
+
+def axisang_to_local_rot(axis_ang_list, used_children, exclude_children):
+    # axis_ang_list: [B, N, 3]
+    quats = batch_aa2quat(axis_ang_list.view(-1, 3))  # [B*N, 4]
+    rot_mats = quat2mat(quats).view(axis_ang_list.shape[0], axis_ang_list.shape[1], 3, 3)  # [B, N, 3, 3]
+    local_rot_mats = torch.zeros_like(rot_mats)
+    for i, idx in enumerate(used_children):
+        parent = JOINT_PARENT_ID_DICT[idx]
+        if parent == -1 or parent in exclude_children:
+            local_rot_mats[:, i] = rot_mats[:, i]
+        else:
+            parent_i = used_children.index(parent)
+            parent_rot = rot_mats[:, parent_i]
+            child_rot = rot_mats[:, i]
+            local_rot_mats[:, i] = torch.matmul(parent_rot.transpose(1, 2), child_rot)
+    return local_rot_mats

@@ -2,8 +2,10 @@
 
 This project utilizes a parameterized hand model, **NIMBLE**, for generating continuous and dense simulated right-hand datasets including meshes, textures, and keypoints, to support downstream tasks such as **hand pose estimation**. The NIMBLE model is based on a non-rigid hand structure with bones and muscles, enabling realistic hand motion simulation and anatomically plausible deformation.
 
-
-
+## Usage
+```python
+python demo.py
+```
 
 
 ## 📚 Based on NIMBLE

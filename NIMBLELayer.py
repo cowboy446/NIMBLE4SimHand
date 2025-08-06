@@ -123,6 +123,7 @@ class NIMBLELayer(torch.nn.Module):
         th_v_shaped = (self.shape_basis[:shape_ncomp].T @ betas_real.T).view(-1, 3, batch_size).permute(2, 0, 1) + self.th_verts.unsqueeze(0).repeat(batch_size, 1, 1)
         
         jreg_bone_joints = torch.matmul(self.jreg_bone, th_v_shaped[:, :self.bone_v_sep])
+        # print(f"jreg_bone_joints: {jreg_bone_joints}")
         return th_v_shaped, jreg_bone_joints
 
     def generate_full_pose(self, theta, normalized=True, with_root=True):

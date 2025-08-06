@@ -36,9 +36,12 @@ if __name__ == "__main__":
     
     total_samples = 1  # 总共要生成的样本数
     batch_size = 1  # 每次处理的批次大小
-    output_folder = "output_handcraft"
+    output_folder = "output_ik"
     os.makedirs(output_folder, exist_ok=True)
-    
+    pose_param = torch.zeros(1, 20, 3, device=device)
+    shape_param = torch.zeros(1, 20, device=device)
+    _, rest_joints = nlayer.generate_hand_shape(shape_param, normalized=True)
+    print(f"rest_joints: {rest_joints}")
     # 使用循环分批处理，减少内存占用
     for batch_idx in range(0, total_samples, batch_size):
         print(f"处理批次 {batch_idx//batch_size + 1}/{total_samples//batch_size}...")
@@ -46,38 +49,15 @@ if __name__ == "__main__":
 
         # 模板：用方向和模长控制所有关节旋转
         # 方向 shape: (bn, 20, 3), 长度 shape: (bn, 20)
+        # kpt_3d = np.loadtxt("output_handcraft/joints25/seq0_frame1_joints25.xyz")
+        kpt_3d = np.loadtxt("output_range0.1_seq5/joints25/seq2_frame1_joints25.xyz")
+        kpt_3d = torch.tensor(kpt_3d, dtype=torch.float32, device=device)
+        kpt_3d = kpt_3d.unsqueeze(0).repeat(bn, 1, 1)  # 扩展到批次大小
+        print(f"kpt_3d shape: {kpt_3d.shape}")
+
         direction = np.zeros((bn, 20, 3), dtype=np.float32)
         length = np.ones((bn, 20), dtype=np.float32)
-        # 按图中参数填充
-        direction[0, 0] = [0.00, 0.00, 0.00]
-        direction[0, 1] = [0.00, 0.00, 0.00]
-        direction[0, 2] = [0.00, -1.00, 0.00]
-        direction[0, 3] = [-1.00, 0.00, 0.00]
-        direction[0, 4] = [0.00, 0.00, 0.00]
-        direction[0, 5] = [0.00, 0.00, 0.00]
-        direction[0, 6] = [0.00, 0.00, 0.00]
-        direction[0, 7] = [0.00, 0.00, 0.00]
-        direction[0, 8] = [0.00, 0.00, 0.00]
-        direction[0, 9] = [0.00, 0.00, 0.00]
-        direction[0,10] = [0.00, 0.00, 0.00]
-        direction[0,11] = [0.00, 0.00, 0.00]
-        direction[0,12] = [0.00, 0.00, 0.00]
-        direction[0,13] = [1.00, 0.00, 0.00]
-        direction[0,14] = [1.00, 0.00, 1.00]
-        direction[0,15] = [1.00, 0.00, 0.00]
-        direction[0,16] = [0.00, 0.00, 0.00]
-        direction[0,17] = [1.00, 0.00, 0.00]
-        direction[0,18] = [1.00, 0.00, 1.00]
-        direction[0,19] = [1.00, 0.00, 1.00]
-        # 长度全部为1
-        length[0, :] = 0.50
-        # 归一化方向后乘以模长，得到轴角
-        norm = np.linalg.norm(direction, axis=2, keepdims=True)
-        norm[norm < 1e-8] = 1.0  # 防止除零
-        axis = direction / norm
-        axis_angle = axis * length[..., np.newaxis]  # (bn, 20, 3)
-        pose_param = torch.tensor(axis_angle, dtype=torch.float32, device=device)
-
+        pose_param, direction, length = posevec_2axisang(kpt_3d, rest_joints)
         shape_param = torch.zeros(bn, 20, device=device)
         tex_param = torch.zeros(bn, 10, device=device)
 
