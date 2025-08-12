@@ -242,11 +242,11 @@ def posevec_2axisang(pose_3d, rest_pose_3d):
     axis_ang_list = torch.zeros((pose_3d.shape[0], len(used_children), 3), dtype=pose_3d.dtype, device=pose_3d.device)
     exclude_axis_ang_list = torch.zeros((pose_3d.shape[0], len(exclude_children), 3), dtype=pose_3d.dtype, device=pose_3d.device)
     for i, idx in enumerate(used_children):
-        print("i = ", i, "idx = ", idx)
+        # print("i = ", i, "idx = ", idx)
         parent = JOINT_PARENT_ID_DICT[idx]
         if parent == -1:
             continue
-        print(pose_3d.shape, rest_pose_3d.shape)
+        # print(pose_3d.shape, rest_pose_3d.shape)
         p_parent = pose_3d[:, parent, :]
         p_child = pose_3d[:, idx, :]
         rest_parent = rest_pose_3d[:, parent, :]
@@ -255,11 +255,11 @@ def posevec_2axisang(pose_3d, rest_pose_3d):
         axis_ang = ik_hand_pose(p_parent, p_child, rest_parent, rest_child)
         axis_ang_list[:, i, :] = axis_ang
     for i, idx in enumerate(exclude_children):
-        print("i = ", i, "idx = ", idx)
+        # print("i = ", i, "idx = ", idx)
         parent = JOINT_PARENT_ID_DICT[idx]
         if parent == -1:
             continue
-        print(pose_3d.shape, rest_pose_3d.shape)
+        # print(pose_3d.shape, rest_pose_3d.shape)
         p_parent = pose_3d[:, parent, :]
         p_child = pose_3d[:, idx, :]
         rest_parent = rest_pose_3d[:, parent, :]
@@ -294,7 +294,7 @@ def posevec_2axisang(pose_3d, rest_pose_3d):
         # 转回轴角: 旋转矩阵 -> 四元数 -> 轴角
         from pytorch3d.transforms import matrix_to_axis_angle
         local_axis_ang = matrix_to_axis_angle(local_rot)
-        print("local_axis_ang.shape = ", local_axis_ang.shape)
+        # print("local_axis_ang.shape = ", local_axis_ang.shape)
         axis_ang_local_list[:, i, :] = local_axis_ang
 
     # pose_3d = pose_3d.reshape(pose_3d.shape[0], -1)
@@ -302,7 +302,7 @@ def posevec_2axisang(pose_3d, rest_pose_3d):
     length = torch.norm(axis_ang_local_list, dim=-1, keepdim=True)
     length[length < 1e-8] = 1.0
     direction = axis_ang_local_list / length
-    print("axis_ang_local_list: ", axis_ang_local_list)
+    # print("axis_ang_local_list: ", axis_ang_local_list)
     return axis_ang_local_list, direction, length
 
 def ik_hand_pose(p_parent, p_child, rest_parent, rest_child):
