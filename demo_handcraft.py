@@ -71,7 +71,8 @@ if __name__ == "__main__":
             direction[bidx,18] = [1.00, 0.00, 1.00]
             direction[bidx,19] = [1.00, 0.00, 1.00]
             # 长度全部为1
-            length[bidx, :] = bidx / 2.0
+            # length[bidx, :] = bidx / 2.0
+            length[bidx, 0] = 0
             print("bidx: ", bidx, "length: ", length[bidx, 0])
         # 归一化方向后乘以模长，得到轴角
         # 将方向和长度从tensor转换为numpy数组

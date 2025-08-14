@@ -11,6 +11,36 @@ from pytorch3d.structures.meshes import Meshes
 import pytorch3d.ops
 import os
 
+JOINT_PARENT_ID_DICT_MANO = {
+    0: -1,
+
+    1: 0,
+    2: 1,
+    3: 2,
+    4: 3,
+
+    5: 0,
+    6: 5,
+    7: 6,
+    8: 7,
+
+    9: 0,
+    10: 9,
+    11: 10,
+    12: 11,
+
+    13: 0,
+    14: 13,
+    15: 14,
+    16: 0,
+
+    17: 16,
+    18: 17,
+    19: 18,
+    20: 19
+}
+
+
 ROOT_JOINT_IDX = 0  # wrist
 DOF2_BONES = [1, 2, 4, 5, 8, 9, 12, 13, 16, 17]
 DOF1_BONES = [3, 6, 7, 10, 11, 14, 15, 18, 19]
@@ -239,11 +269,82 @@ def th_posemap_axisang_2output(pose_vectors):
 def posevec_2axisang(pose_3d, rest_pose_3d):
     exclude_children = [1, 5, 10, 15, 20]  # wrist and thumb base
     used_children = [i for i in range(25) if i not in exclude_children]
-    axis_ang_list = torch.zeros((pose_3d.shape[0], len(used_children), 3), dtype=pose_3d.dtype, device=pose_3d.device)
+    axis_ang_list = torch.zeros((pose_3d.shape[0], 20, 3), dtype=pose_3d.dtype, device=pose_3d.device)
     exclude_axis_ang_list = torch.zeros((pose_3d.shape[0], len(exclude_children), 3), dtype=pose_3d.dtype, device=pose_3d.device)
     for i, idx in enumerate(used_children):
         # print("i = ", i, "idx = ", idx)
         parent = JOINT_PARENT_ID_DICT[idx]
+        if parent == -1:
+            continue
+        # print(pose_3d.shape, rest_pose_3d.shape)
+        p_parent = pose_3d[:, parent, :]
+        p_child = pose_3d[:, idx, :]
+        rest_parent = rest_pose_3d[:, parent, :]
+        # import pdb; pdb.set_trace()
+        rest_child = rest_pose_3d[:, idx, :]
+        axis_ang = ik_hand_pose(p_parent, p_child, rest_parent, rest_child)
+        axis_ang_list[:, i, :] = axis_ang
+    for i, idx in enumerate(exclude_children):
+        # print("i = ", i, "idx = ", idx)
+        parent = JOINT_PARENT_ID_DICT[idx]
+        if parent == -1:
+            continue
+        # print(pose_3d.shape, rest_pose_3d.shape)
+        p_parent = pose_3d[:, parent, :]
+        p_child = pose_3d[:, idx, :]
+        rest_parent = rest_pose_3d[:, parent, :]
+        rest_child = rest_pose_3d[:, idx, :]
+        axis_ang = ik_hand_pose(p_parent, p_child, rest_parent, rest_child)
+        exclude_axis_ang_list[:, i, :] = axis_ang
+    # 从全局变换计算局部local变换
+    axis_ang_local_list = torch.zeros_like(axis_ang_list)
+    for i in range(len(used_children)):
+        child_idx = used_children[i]
+        parent = JOINT_PARENT_ID_DICT[child_idx]
+        if parent == -1:
+            continue
+        if parent in exclude_children:
+            parent_i = exclude_children.index(parent)
+            parent_axis_ang = exclude_axis_ang_list[:, parent_i, :]
+            child_axis_ang = axis_ang_list[:, i, :]
+        elif parent in used_children:
+            parent_i = used_children.index(parent)
+            parent_axis_ang = axis_ang_list[:, parent_i, :]
+            child_axis_ang = axis_ang_list[:, i, :]
+            
+        # 转为四元数和旋转矩阵
+        parent_quat = batch_aa2quat(parent_axis_ang)
+        child_quat = batch_aa2quat(child_axis_ang)
+        parent_rot = quat2mat(parent_quat)
+        child_rot = quat2mat(child_quat)
+        
+        # 计算局部旋转: local = parent^T * child
+        local_rot = torch.matmul(parent_rot.transpose(1, 2), child_rot)
+        
+        # 转回轴角: 旋转矩阵 -> 四元数 -> 轴角
+        from pytorch3d.transforms import matrix_to_axis_angle
+        local_axis_ang = matrix_to_axis_angle(local_rot)
+        # print("local_axis_ang.shape = ", local_axis_ang.shape)
+        axis_ang_local_list[:, i, :] = local_axis_ang
+
+    # pose_3d = pose_3d.reshape(pose_3d.shape[0], -1)
+    # import pdb; pdb.set_trace()
+    length = torch.norm(axis_ang_local_list, dim=-1, keepdim=True)
+    length[length < 1e-8] = 1.0
+    direction = axis_ang_local_list / length
+    # print("axis_ang_local_list: ", axis_ang_local_list)
+    return axis_ang_local_list, direction, length
+
+def posevec_2axisang_mano(pose_3d, rest_pose_3d):
+    # pose_3d: B x 21 x 3
+    # rest_pose_3d: B x 21 x 3
+    exclude_children = [1, 5, 9, 13, 17]  # wrist and thumb base
+    used_children = [i for i in range(21) if i not in exclude_children]
+    axis_ang_list = torch.zeros((pose_3d.shape[0], 16, 3), dtype=pose_3d.dtype, device=pose_3d.device)
+    exclude_axis_ang_list = torch.zeros((pose_3d.shape[0], len(exclude_children), 3), dtype=pose_3d.dtype, device=pose_3d.device)
+    for i, idx in enumerate(used_children):
+        # print("i = ", i, "idx = ", idx)
+        parent = JOINT_PARENT_ID_DICT_MANO[idx]
         if parent == -1:
             continue
         # print(pose_3d.shape, rest_pose_3d.shape)
