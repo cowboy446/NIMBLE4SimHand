@@ -3,8 +3,8 @@ import torch
 import numpy as np
 from NIMBLELayer import NIMBLELayer
 
-from utils import batch_to_tensor_device, save_textured_nimble, smooth_mesh
-from utils import *
+# from utils import batch_to_tensor_device, save_textured_nimble, smooth_mesh
+from utils_for_mano import *
 import pytorch3d
 import pytorch3d.io
 from pytorch3d.structures.meshes import Meshes
@@ -56,23 +56,30 @@ if __name__ == "__main__":
         kpt_3d = torch.tensor(kpt_3d, dtype=torch.float32, device=device)
         kpt_3d = kpt_3d.unsqueeze(0).repeat(bn, 1, 1)  # 扩展到批次大小
         print(f"kpt_3d shape: {kpt_3d.shape}")
+        # 去掉第5,10,15,20个关节点
+        kpt_mano = kpt_3d[:, [0, 1, 2, 3, 4, 6, 7, 8, 9, 11, 12, 13, 14, 16, 17, 18, 19, 21, 22, 23, 24], :]
+        print(f"kpt_mano shape: {kpt_mano.shape}")
+        rest_mano  = rest_joints[:, [0, 1, 2, 3, 4, 6, 7, 8, 9, 11, 12, 13, 14, 16, 17, 18, 19, 21, 22, 23, 24], :]
+        mano_aa,_,_ = posevec_2axisang_mano(kpt_mano, rest_mano)
+        print(f"mano_aa shape: {mano_aa.shape}")
 
         direction = np.zeros((bn, 20, 3), dtype=np.float32)
         length = np.ones((bn, 20), dtype=np.float32)
-        pose_param, direction, length = posevec_2axisang(kpt_3d, rest_joints)
-        time_mid = time.time()
-        print(f"delta time for posevec_2axisang: {time_mid - start_time:.2f} seconds")
+        pose_param, direction, length = posevec_2axisang_nimble(kpt_3d, rest_joints)
         shape_param = torch.zeros(bn, 20, device=device)
         tex_param = torch.zeros(bn, 10, device=device)
 
+        kpts = nlayer.forward_joints(pose_param, shape_param)
+        time_mid = time.time()
+        print(f"delta time for posevec_2axisang: {time_mid - start_time:.2f} seconds")
         # 生成模型
         skin_v, muscle_v, bone_v, bone_joints, tex_img = nlayer.forward(pose_param, shape_param, tex_param, handle_collision=True)
         # 创建网格
-        skin_p3dmesh = Meshes(skin_v, nlayer.skin_f.repeat(bn, 1, 1))
-        muscle_p3dmesh = Meshes(muscle_v, nlayer.muscle_f.repeat(bn, 1, 1))
-        bone_p3dmesh = Meshes(bone_v, nlayer.bone_f.repeat(bn, 1, 1))
-        # 平滑网格
-        skin_p3dmesh = smooth_mesh(skin_p3dmesh)
+        # skin_p3dmesh = Meshes(skin_v, nlayer.skin_f.repeat(bn, 1, 1))
+        # muscle_p3dmesh = Meshes(muscle_v, nlayer.muscle_f.repeat(bn, 1, 1))
+        # bone_p3dmesh = Meshes(bone_v, nlayer.bone_f.repeat(bn, 1, 1))
+        # # 平滑网格
+        # skin_p3dmesh = smooth_mesh(skin_p3dmesh)
         # muscle_p3dmesh = smooth_mesh(muscle_p3dmesh)
         # bone_p3dmesh = smooth_mesh(bone_p3dmesh)
         # # 转换到MANO顶点

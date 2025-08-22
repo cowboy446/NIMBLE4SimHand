@@ -8,3 +8,4 @@ pose_visualization/
 *.png
 *.xml
 dataset_collector.py
+mano
