@@ -3,10 +3,20 @@
 This project utilizes a parameterized hand model, **NIMBLE**, for generating continuous and dense simulated right-hand datasets including meshes, textures, and keypoints, to support downstream tasks such as **hand pose estimation**. The NIMBLE model is based on a non-rigid hand structure with bones and muscles, enabling realistic hand motion simulation and anatomically plausible deformation.
 
 ## Usage
-```python
-python demo.py
-```
 
+1. `demo4sequence.py`: Generates a sequence of hand meshes with continuously changing poses, starting from the rest pose principal components (all zeros) and randomly varying the 30-dimensional PCA-reduced pose parameters (originally 20x3=60 dimensions)
+
+    ```python
+    python demo4sequence.py
+    ```
+
+2. `demo_ik.py`: Takes 25 hand keypoints in the NIMBLE format as input and performs inverse kinematics (IK) to compute the local axis-angle transformation parameters from the rest joints to the target joints. This can be used to drive the NIMBLE hand model, enabling a pipeline of keypoints (e.g., captured from motion capture systems) → IK solving → NIMBLE hand model driving → mesh generation for arbitrary hand gestures.
+
+    ```python
+    python demo_ik.py
+    ```
+
+The IK solver for the NIMBLE model is implemented in `utils.py`. The file `utils_for_mano.py` provides IK solvers for both MANO and NIMBLE models. These files can be directly integrated into other projects (note: the order of axis-angle vectors differs from the MANO definition).
 
 ## 📚 Based on NIMBLE
 

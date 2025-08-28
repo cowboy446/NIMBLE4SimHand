@@ -278,11 +278,7 @@ def posevec_2axisang_nimble(pose_3d, rest_pose_3d):
     for i, idx in enumerate(used_children):
         # print("i = ", i, "idx = ", idx)
         parent = JOINT_PARENT_ID_DICT[idx]
-        if parent == -1:
-            p_parent = torch.zeros_like(pose_3d[:, idx, :]) #wrist 为根节点，用世界零点到wrist的向量变换计算全局变换，即第0维轴角
-        # print(pose_3d.shape, rest_pose_3d.shape)
-        else:
-            p_parent = pose_3d[:, parent, :]
+        p_parent = pose_3d[:, parent, :] if parent != -1 else torch.zeros_like(pose_3d[:, idx, :])
         p_child = pose_3d[:, idx, :]
         rest_parent = rest_pose_3d[:, parent, :]
         # import pdb; pdb.set_trace()
